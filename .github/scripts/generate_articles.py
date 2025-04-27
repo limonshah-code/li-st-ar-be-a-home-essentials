@@ -34,7 +34,7 @@ KEYWORDS_FILE = "data/keywords.txt"
 PROCESSED_KEYWORDS_FILE = "data/processed_keywords.txt"
 GENERATED_KEYWORDS_FILE = "data/keywords-generated.txt"  # New file for successfully generated keywords
 LINKS_FILE = "data/links.txt"  # New file for tracking links
-ARTICLES_PER_RUN = 1
+ARTICLES_PER_RUN = 30
 TOP_LINKS_COUNT = 70  # Number of top relevant links to include
 
 # Ensure output directories exist
@@ -210,7 +210,7 @@ Article Structure Requirements:
    - Include primary/secondary keywords
    - Use H3 subsections where appropriate
    - Include bullet points or numbered lists
-   - Include 3-4 anchor texts links that are contextually relevant to the current content. Choose from these most relevant links based on cosine similarity:
+   - Include 3-7 anchor texts links that are contextually relevant to the current content. Choose from these most relevant links based on cosine similarity:
    {links_json}
    - Natural transitions between sections
 6. FAQ Section: 4-6 questions based on common search queries, with concise answers (50-75 words each)
