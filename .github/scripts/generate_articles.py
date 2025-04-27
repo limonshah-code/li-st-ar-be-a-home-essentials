@@ -168,7 +168,7 @@ def create_article_prompt(title, article_number, image_url):
     tomorrow = datetime.now() + timedelta(days=1)
     publish_date = tomorrow.strftime("%Y-%m-%d")
     slug = create_slug(title)
-    canonical_url = f"https://www.beacleaner.com//{slug}"
+    canonical_url = f"https://www.beacleaner.com/{slug}"
     
     # Get existing links from links.txt
     existing_links = get_existing_links()
