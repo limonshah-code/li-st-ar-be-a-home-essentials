@@ -34,8 +34,8 @@ KEYWORDS_FILE = "data/keywords.txt"
 PROCESSED_KEYWORDS_FILE = "data/processed_keywords.txt"
 GENERATED_KEYWORDS_FILE = "data/keywords-generated.txt"  # New file for successfully generated keywords
 LINKS_FILE = "data/links.txt"  # New file for tracking links
-ARTICLES_PER_RUN = 2
-TOP_LINKS_COUNT = 50  # Number of top relevant links to include
+ARTICLES_PER_RUN = 30
+TOP_LINKS_COUNT = 70  # Number of top relevant links to include
 
 # Ensure output directories exist
 os.makedirs(OUTPUT_DIR, exist_ok=True)
