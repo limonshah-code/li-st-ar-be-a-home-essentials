@@ -352,7 +352,7 @@ def append_processed_keywords(keywords, urls, filename=PROCESSED_KEYWORDS_FILE):
             
             f.write(f"## Batch processed on {timestamp}\n")
             for keyword, url in zip(keywords, urls):
-                f.write(f"- [{timestamp}] {keyword} - {url}\n")
+                f.write(f"[{url}\n")
             f.write("\n")  # Add a blank line between batches
         return True
     except Exception as e:
