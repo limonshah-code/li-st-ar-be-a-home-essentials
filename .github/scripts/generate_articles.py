@@ -728,43 +728,86 @@ def generate_and_upload_image(title):
         return None
 
     client = get_gemini_client()
+    
     # Try each API key once
     for _ in range(len(GEMINI_API_KEYS)):
         try:
             print(f"Generating image with API key index {current_api_key_index}...")
             model = "gemini-2.0-flash-exp-image-generation"
+            
+            # --- Start of New Enhanced Prompt ---
+            enhanced_prompt = f"""
+Create a visually stunning, photorealistic blog header image for the article titled: '{title}'.
+
+**Image Style Guidelines:**
+- **Aesthetic:** Clean, modern, and professional.
+- **Lighting:** Bright, soft natural lighting that creates a welcoming and high-quality feel. Avoid harsh shadows.
+- **Composition:** A well-balanced composition, possibly using the rule of thirds. The main subject should be in sharp focus.
+- **Color Palette:** Vibrant, yet natural colors that are eye-catching and harmonious.
+- **Detail Level:** High detail, 4K resolution, hyperrealistic.
+- **Overall Mood:** Inspiring and engaging.
+
+The image should be cinematic and of professional photography quality, suitable for a high-traffic blog.
+"""
+            # --- End of New Enhanced Prompt ---
+
             contents = [types.Content(
                 role="user",
-                parts=[types.Part.from_text(text=f"Create a realistic blog header image for: {title}")]
+                parts=[types.Part.from_text(text=enhanced_prompt)]
             )]
+            
             response = client.models.generate_content(
                 model=model,
-                contents=contents,
-                config=types.GenerateContentConfig(response_modalities=["image", "text"])
+                contents=contents
             )
 
-            if response.candidates and response.candidates[0].content.parts:
-                inline_data = response.candidates[0].content.parts[0].inline_data
-                file_ext = mimetypes.guess_extension(inline_data.mime_type)
-                original_file = f"generated_image_{int(time.time())}{file_ext}"
-                save_binary_file(original_file, inline_data.data)
+            # --- Start of robust response checking ---
+            if not response.candidates:
+                print("Image generation failed: The response contained no candidates. Trying next key.")
+                client = rotate_gemini_client()
+                continue 
 
-                # Compress and convert to WebP
-                final_file = compress_image(original_file)
-                return upload_to_cloudinary(final_file)
-            return None # Successful generation but no content
+            # Check if the response part contains image data
+            part = response.candidates[0].content.parts[0]
+            if not part.inline_data:
+                print("Image generation failed: The response did not contain image data.")
+                # Log the reason if the API provided one
+                if part.text:
+                    print(f"Reason: {part.text}")
+                print("Trying next key...")
+                client = rotate_gemini_client()
+                continue 
+            
+            # If we get here, we have valid image data
+            inline_data = part.inline_data
+            file_ext = mimetypes.guess_extension(inline_data.mime_type)
+            
+            # Add a fallback for unknown mime types
+            if not file_ext:
+                print(f"Warning: Could not determine file extension for mime_type '{inline_data.mime_type}'. Defaulting to '.jpg'")
+                file_ext = ".jpg"
+                
+            original_file = f"generated_image_{int(time.time())}{file_ext}"
+            save_binary_file(original_file, inline_data.data)
+
+            # Compress and convert to WebP
+            final_file = compress_image(original_file)
+            print("Image generated successfully.")
+            return upload_to_cloudinary(final_file)
+            # --- End of robust response checking ---
 
         except google_exceptions.ResourceExhausted as e:
             print(f"API key at index {current_api_key_index} is exhausted for image generation. Trying next key.")
-            client = rotate_gemini_client() # Rotate key and get new client
+            client = rotate_gemini_client()
         
         except Exception as e:
+            # Catch other API errors or unexpected issues
             print(f"An unexpected error occurred during image generation: {e}")
-            return None # Fail on other errors
+            print("Trying next API key...")
+            client = rotate_gemini_client()
 
-    print("Image generation failed: All API keys are exhausted.")
+    print("Image generation failed after trying all available API keys.")
     return None
-
 
 def create_slug(title):
     """Generate SEO-friendly slug from title"""
