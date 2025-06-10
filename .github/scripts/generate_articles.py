@@ -126,7 +126,7 @@ def create_slug(title):
 def link_to_keywords(link):
     """Convert a link to plain text keywords"""
     # Extract path from URL
-    url_path = link.split('beacleaner.com/')[-1].strip('/')
+    url_path = link.split('homeessentialsguide.com/')[-1].strip('/')
     # Convert hyphens to spaces and remove trailing slash
     keywords = url_path.replace('-', ' ')
     return keywords
@@ -168,7 +168,7 @@ def create_article_prompt(title, article_number, image_url):
     tomorrow = datetime.now() + timedelta(days=1)
     publish_date = tomorrow.strftime("%Y-%m-%d")
     slug = create_slug(title)
-    canonical_url = f"https://www.beacleaner.com/{slug}"
+    canonical_url = f"https://www.homeessentialsguide.com/{slug}"
     
     # Get existing links from links.txt
     existing_links = get_existing_links()
@@ -502,11 +502,7 @@ def update_keyword_files(all_used_keywords, article_urls):
     # Get existing links and append new ones to links.txt
     existing_links = get_existing_links(LINKS_FILE)
     old_links = [
-        "https://beacleaner.com/how-can-you-use-a-carpet-cleaner-on-hardwood-floor/",
-        "https://beacleaner.com/how-to-clean-luxury-vinyl-plank-flooring/",
-        "https://beacleaner.com/how-to-remove-baking-soda-residue-from-carpet/",
-        "https://beacleaner.com/how-to-clean-floor-grout-without-scrubbing/",
-        "https://beacleaner.com/how-to-remove-old-wax-build-up-from-floors/"
+        "https://www.homeessentialsguide.com/can-you-vacuum-cowhide-rugs",
     ]
     
     # Filter out old links that are already in the links file
@@ -539,7 +535,7 @@ def main():
         try:
             # Generate slug and URL
             slug = create_slug(title)
-            article_url = f"https://beacleaner.com/{slug}"
+            article_url = f"https://homeessentialsguide.com/{slug}"
             
             # Generate image
             image_url = generate_and_upload_image(title) or default_image_url
