@@ -647,7 +647,7 @@ class APIKeyManager:
         self.api_keys = self._load_api_keys()
         self.current_key_index = 0
         self.key_usage_count = {}
-        self.max_requests_per_key = 10  # Leave some buffer below 500 limit
+        self.max_requests_per_key = 100  # Leave some buffer below 500 limit
         self.failed_keys = set()  # Track keys that have failed
         
         # Initialize usage counters
