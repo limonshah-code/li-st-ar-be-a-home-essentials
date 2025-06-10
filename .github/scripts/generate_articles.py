@@ -647,7 +647,7 @@ class APIKeyManager:
         self.api_keys = self._load_api_keys()
         self.current_key_index = 0
         self.key_usage_count = {}
-        self.max_requests_per_key = 450  # Leave some buffer below 500 limit
+        self.max_requests_per_key = 10  # Leave some buffer below 500 limit
         self.failed_keys = set()  # Track keys that have failed
         
         # Initialize usage counters
@@ -960,7 +960,7 @@ def generate_article(prompt):
         try:
             current_key = api_key_manager.get_current_key()
             client = genai.Client(api_key=current_key)
-            model = "gemma-3-27b-it"
+           model = "gemini-2.5-pro-preview-05-06"
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
             generate_content_config = types.GenerateContentConfig(
                 temperature=1,
