@@ -610,60 +610,12 @@ from datetime import datetime, timedelta
 from PIL import Image
 from google import genai
 from google.genai import types
-from google.api_core import exceptions as google_exceptions
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-
-# --- Start of API Key Rotation Logic ---
-
-# Global index to track which API key to use
-current_api_key_index = 0
-
-def get_gemini_api_keys():
-    """
-    Reads Gemini API keys from environment variables.
-    It looks for GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.,
-    and falls back to the single GEMINI_API_KEY if no numbered keys are found.
-    """
-    keys = []
-    i = 1
-    while True:
-        key = os.environ.get(f"GEMINI_API_KEY_{i}")
-        if key:
-            keys.append(key)
-            i += 1
-        else:
-            # Fallback to the original single key if no numbered keys found
-            single_key = os.environ.get("GEMINI_API_KEY")
-            if single_key and not keys:
-                keys.append(single_key)
-            break
-    return keys
-
-GEMINI_API_KEYS = get_gemini_api_keys()
-if not GEMINI_API_KEYS:
-    print("Warning: No Gemini API keys found. Generation will fail.")
-
-def get_gemini_client():
-    """Returns a Gemini client with the current API key."""
-    if not GEMINI_API_KEYS:
-        return None
-    api_key = GEMINI_API_KEYS[current_api_key_index]
-    return genai.Client(api_key=api_key)
-
-def rotate_gemini_client():
-    """Rotates to the next API key and returns a new client."""
-    global current_api_key_index
-    current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
-    print(f"Switching to Gemini API key at index: {current_api_key_index}")
-    return get_gemini_client()
-
-# --- End of API Key Rotation Logic ---
-
 
 # Configure output directory
 OUTPUT_DIR = "generated-articles"
@@ -687,6 +639,110 @@ try:
 except LookupError:
     nltk.download('punkt')
     nltk.download('stopwords')
+
+class APIKeyManager:
+    """Manages multiple Gemini API keys with rotation and quota tracking"""
+    
+    def __init__(self):
+        self.api_keys = self._load_api_keys()
+        self.current_key_index = 0
+        self.key_usage_count = {}
+        self.max_requests_per_key = 450  # Leave some buffer below 500 limit
+        self.failed_keys = set()  # Track keys that have failed
+        
+        # Initialize usage counters
+        for key in self.api_keys:
+            self.key_usage_count[key] = 0
+    
+    def _load_api_keys(self):
+        """Load all available Gemini API keys from environment variables"""
+        keys = []
+        
+        # Try to load GEMINI_API_KEY_1 through GEMINI_API_KEY_6
+        for i in range(1, 7):
+            key = os.environ.get(f"GEMINI_API_KEY_{i}")
+            if key:
+                keys.append(key)
+                print(f"Loaded API key #{i}")
+        
+        # Also try the original GEMINI_API_KEY for backward compatibility
+        original_key = os.environ.get("GEMINI_API_KEY")
+        if original_key and original_key not in keys:
+            keys.append(original_key)
+            print("Loaded original GEMINI_API_KEY")
+        
+        if not keys:
+            raise ValueError("No Gemini API keys found in environment variables")
+        
+        print(f"Total API keys loaded: {len(keys)}")
+        return keys
+    
+    def get_current_key(self):
+        """Get the current active API key"""
+        if not self.api_keys:
+            raise ValueError("No API keys available")
+        
+        # If current key has failed or exceeded quota, rotate to next
+        current_key = self.api_keys[self.current_key_index]
+        
+        if (current_key in self.failed_keys or 
+            self.key_usage_count[current_key] >= self.max_requests_per_key):
+            self._rotate_key()
+            current_key = self.api_keys[self.current_key_index]
+        
+        return current_key
+    
+    def _rotate_key(self):
+        """Rotate to the next available API key"""
+        attempts = 0
+        while attempts < len(self.api_keys):
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            current_key = self.api_keys[self.current_key_index]
+            
+            # Check if this key is still usable
+            if (current_key not in self.failed_keys and 
+                self.key_usage_count[current_key] < self.max_requests_per_key):
+                print(f"Rotated to API key #{self.current_key_index + 1}")
+                return
+            
+            attempts += 1
+        
+        # If we get here, all keys are exhausted
+        raise Exception("All API keys have been exhausted or failed")
+    
+    def increment_usage(self, key):
+        """Increment usage count for a specific key"""
+        if key in self.key_usage_count:
+            self.key_usage_count[key] += 1
+            print(f"API key usage: {self.key_usage_count[key]}/{self.max_requests_per_key}")
+    
+    def mark_key_as_failed(self, key, error_message):
+        """Mark a key as failed due to quota or other errors"""
+        self.failed_keys.add(key)
+        print(f"Marked API key as failed: {error_message}")
+        
+        # If this was our current key, rotate immediately
+        if key == self.api_keys[self.current_key_index]:
+            try:
+                self._rotate_key()
+            except Exception as e:
+                print(f"Failed to rotate key: {e}")
+    
+    def get_status(self):
+        """Get status of all API keys"""
+        status = {}
+        for i, key in enumerate(self.api_keys):
+            key_id = f"Key_{i+1}"
+            status[key_id] = {
+                "usage": self.key_usage_count[key],
+                "max_requests": self.max_requests_per_key,
+                "failed": key in self.failed_keys,
+                "active": i == self.current_key_index
+            }
+        return status
+
+# Initialize API key manager
+api_key_manager = APIKeyManager()
 
 def save_binary_file(file_name, data):
     with open(file_name, "wb") as f:
@@ -723,91 +779,59 @@ def upload_to_cloudinary(file_path, resource_type="image"):
         return None
 
 def generate_and_upload_image(title):
-    if not GEMINI_API_KEYS:
-        print("Image generation error: No Gemini API keys configured.")
-        return None
-
-    client = get_gemini_client()
+    max_retries = 3
     
-    # Try each API key once
-    for _ in range(len(GEMINI_API_KEYS)):
+    for attempt in range(max_retries):
         try:
-            print(f"Generating image with API key index {current_api_key_index}...")
+            current_key = api_key_manager.get_current_key()
+            client = genai.Client(api_key=current_key)
             model = "gemini-2.0-flash-exp-image-generation"
-            
-            # --- Start of New Enhanced Prompt ---
-            enhanced_prompt = f"""
-Create a visually stunning, photorealistic blog header image for the article titled: '{title}'.
-
-**Image Style Guidelines:**
-- **Aesthetic:** Clean, modern, and professional.
-- **Lighting:** Bright, soft natural lighting that creates a welcoming and high-quality feel. Avoid harsh shadows.
-- **Composition:** A well-balanced composition, possibly using the rule of thirds. The main subject should be in sharp focus.
-- **Color Palette:** Vibrant, yet natural colors that are eye-catching and harmonious.
-- **Detail Level:** High detail, 4K resolution, hyperrealistic.
-- **Overall Mood:** Inspiring and engaging.
-
-The image should be cinematic and of professional photography quality, suitable for a high-traffic blog.
-"""
-            # --- End of New Enhanced Prompt ---
-
             contents = [types.Content(
                 role="user",
-                parts=[types.Part.from_text(text=enhanced_prompt)]
+                parts=[types.Part.from_text(text=f"Create a realistic blog header image for: {title}")]
             )]
-            
             response = client.models.generate_content(
                 model=model,
-                contents=contents
+                contents=contents,
+                config=types.GenerateContentConfig(response_modalities=["image", "text"])
             )
 
-            # --- Start of robust response checking ---
-            if not response.candidates:
-                print("Image generation failed: The response contained no candidates. Trying next key.")
-                client = rotate_gemini_client()
-                continue 
+            # Increment usage counter for successful request
+            api_key_manager.increment_usage(current_key)
 
-            # Check if the response part contains image data
-            part = response.candidates[0].content.parts[0]
-            if not part.inline_data:
-                print("Image generation failed: The response did not contain image data.")
-                # Log the reason if the API provided one
-                if part.text:
-                    print(f"Reason: {part.text}")
-                print("Trying next key...")
-                client = rotate_gemini_client()
-                continue 
+            if response.candidates and response.candidates[0].content.parts:
+                inline_data = response.candidates[0].content.parts[0].inline_data
+                file_ext = mimetypes.guess_extension(inline_data.mime_type)
+                original_file = f"generated_image_{int(time.time())}{file_ext}"
+                save_binary_file(original_file, inline_data.data)
+
+                # Compress and convert to WebP
+                final_file = compress_image(original_file)
+                return upload_to_cloudinary(final_file)
+            return None
             
-            # If we get here, we have valid image data
-            inline_data = part.inline_data
-            file_ext = mimetypes.guess_extension(inline_data.mime_type)
-            
-            # Add a fallback for unknown mime types
-            if not file_ext:
-                print(f"Warning: Could not determine file extension for mime_type '{inline_data.mime_type}'. Defaulting to '.jpg'")
-                file_ext = ".jpg"
-                
-            original_file = f"generated_image_{int(time.time())}{file_ext}"
-            save_binary_file(original_file, inline_data.data)
-
-            # Compress and convert to WebP
-            final_file = compress_image(original_file)
-            print("Image generated successfully.")
-            return upload_to_cloudinary(final_file)
-            # --- End of robust response checking ---
-
-        except google_exceptions.ResourceExhausted as e:
-            print(f"API key at index {current_api_key_index} is exhausted for image generation. Trying next key.")
-            client = rotate_gemini_client()
-        
         except Exception as e:
-            # Catch other API errors or unexpected issues
-            print(f"An unexpected error occurred during image generation: {e}")
-            print("Trying next API key...")
-            client = rotate_gemini_client()
-
-    print("Image generation failed after trying all available API keys.")
-    return None
+            error_str = str(e).lower()
+            
+            # Check if it's a quota/resource exhausted error
+            if any(keyword in error_str for keyword in ['quota', 'resource_exhausted', 'limit']):
+                print(f"Quota exhausted for current API key (attempt {attempt + 1}): {e}")
+                api_key_manager.mark_key_as_failed(current_key, str(e))
+                
+                if attempt < max_retries - 1:
+                    print("Retrying with next API key...")
+                    time.sleep(2)  # Brief pause before retry
+                    continue
+            else:
+                print(f"Image generation error (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+            
+            # If we reach here on the last attempt, return None
+            if attempt == max_retries - 1:
+                print("Max retries reached for image generation")
+                return None
 
 def create_slug(title):
     """Generate SEO-friendly slug from title"""
@@ -887,7 +911,6 @@ title: {title}  # Use the exact user-entered title here
 excerpt: [Write compelling meta description between 130-145 characters that includes primary keyword]
 image: {image_url}
 category: [Determine appropriate category based on content]
-author: Stuart
 tags:
   - [related keyword]
   - [secondary keyword]
@@ -931,15 +954,12 @@ Provide the complete article in proper Markdown format.
     return prompt
 
 def generate_article(prompt):
-    if not GEMINI_API_KEYS:
-        return "Error generating article: No Gemini API keys configured."
-
-    client = get_gemini_client()
+    max_retries = 3
     
-    # Try each API key once
-    for _ in range(len(GEMINI_API_KEYS)):
+    for attempt in range(max_retries):
         try:
-            print(f"Generating article with API key index {current_api_key_index}...")
+            current_key = api_key_manager.get_current_key()
+            client = genai.Client(api_key=current_key)
             model = "gemma-3-27b-it"
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
             generate_content_config = types.GenerateContentConfig(
@@ -950,7 +970,10 @@ def generate_article(prompt):
                 response_mime_type="text/plain",
             )
             
+            print(f"Generating article (attempt {attempt + 1})...")
             full_response = ""
+            
+            # Using streaming response
             for chunk in client.models.generate_content_stream(
                 model=model,
                 contents=contents,
@@ -960,19 +983,33 @@ def generate_article(prompt):
                     print(chunk.text, end="", flush=True)
                     full_response += chunk.text
             
+            # Increment usage counter for successful request
+            api_key_manager.increment_usage(current_key)
+            
             print("\nArticle generation complete.")
             return full_response if full_response else "No content generated"
-
-        except google_exceptions.ResourceExhausted as e:
-            print(f"API key at index {current_api_key_index} is exhausted for article generation. Trying next key.")
-            client = rotate_gemini_client() # Rotate key and get new client
             
         except Exception as e:
-            print(f"An unexpected error occurred during article generation: {e}")
-            return f"Error generating article: {e}" # Fail on other errors
+            error_str = str(e).lower()
             
-    return "Error: Failed to generate article after trying all available API keys."
-
+            # Check if it's a quota/resource exhausted error
+            if any(keyword in error_str for keyword in ['quota', 'resource_exhausted', 'limit']):
+                print(f"Quota exhausted for current API key (attempt {attempt + 1}): {e}")
+                api_key_manager.mark_key_as_failed(current_key, str(e))
+                
+                if attempt < max_retries - 1:
+                    print("Retrying with next API key...")
+                    time.sleep(2)  # Brief pause before retry
+                    continue
+            else:
+                print(f"Error generating article (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+            
+            # If we reach here on the last attempt, return error
+            if attempt == max_retries - 1:
+                return f"Error generating article after {max_retries} attempts: {e}"
 
 def send_email_notification(titles, article_urls, recipient_email="beacleaner0@gmail.com"):
     """Send email notification about generated articles"""
@@ -989,10 +1026,23 @@ def send_email_notification(titles, article_urls, recipient_email="beacleaner0@g
     msg['To'] = recipient_email
     msg['Subject'] = f"Generated Articles - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
+    # Add API key usage status to email
+    api_status = api_key_manager.get_status()
+    status_text = "\n\nAPI Key Usage Status:\n"
+    for key_id, status in api_status.items():
+        status_text += f"{key_id}: {status['usage']}/{status['max_requests']} requests"
+        if status['failed']:
+            status_text += " (FAILED)"
+        if status['active']:
+            status_text += " (ACTIVE)"
+        status_text += "\n"
+
     # Add body text
     body = f"The following articles have been generated and committed to the GitHub repository:\n\n"
     for i, (title, url) in enumerate(zip(titles, article_urls), 1):
         body += f"{i}. {title}\n   URL: {url}\n\n"
+    
+    body += status_text
     
     msg.attach(MIMEText(body, 'plain'))
 
@@ -1228,6 +1278,9 @@ def update_keyword_files(all_used_keywords, article_urls):
 
 def main():
     print(f"Starting article generation at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"API Key Manager Status:")
+    for key_id, status in api_key_manager.get_status().items():
+        print(f"  {key_id}: {'Active' if status['active'] else 'Standby'}")
     
     # Get keywords for this run
     keywords, keywords_to_track = get_keywords()
@@ -1277,6 +1330,12 @@ def main():
         if i < len(keywords):
             print("Waiting 10 seconds before next article...")
             time.sleep(10)
+    
+    # Print final API key usage status
+    print(f"\nFinal API Key Usage Status:")
+    for key_id, status in api_key_manager.get_status().items():
+        print(f"  {key_id}: {status['usage']}/{status['max_requests']} requests"
+              f"{' (FAILED)' if status['failed'] else ''}")
     
     # Update keyword files only for successfully processed keywords
     update_keyword_files(successful_keywords, article_urls)
