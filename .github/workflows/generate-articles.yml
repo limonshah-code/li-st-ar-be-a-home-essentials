@@ -63,6 +63,7 @@ jobs:
       # Original API key (for backward compatibility)
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       # Multiple Gemini API keys for rotation
+      GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
       GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
       GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
       GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
